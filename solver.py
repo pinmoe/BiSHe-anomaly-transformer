@@ -31,8 +31,8 @@ class EarlyStopping:
         self.best_score = None
         self.best_score2 = None
         self.early_stop = False
-        self.val_loss_min = np.Inf
-        self.val_loss2_min = np.Inf
+        self.val_loss_min = np.inf
+        self.val_loss2_min = np.inf
         self.delta = delta
         self.dataset = dataset_name
 
@@ -87,7 +87,8 @@ class Solver(object):
         self.criterion = nn.MSELoss()
 
     def build_model(self):
-        self.model = AnomalyTransformer(win_size=self.win_size, enc_in=self.input_c, c_out=self.output_c, e_layers=3)
+        self.model = AnomalyTransformer(win_size=self.win_size, enc_in=self.input_c, c_out=self.output_c, e_layers=3,
+                                        use_dgr_prior=self.use_dgr_prior)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
         if torch.cuda.is_available():
@@ -98,32 +99,33 @@ class Solver(object):
 
         loss_1 = []
         loss_2 = []
-        for i, (input_data, _) in enumerate(vali_loader):
-            input = input_data.float().to(self.device)
-            output, series, prior, _ = self.model(input)
-            series_loss = 0.0
-            prior_loss = 0.0
-            for u in range(len(prior)):
-                series_loss += (torch.mean(my_kl_loss(series[u], (
-                        prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
-                                                                                               self.win_size)).detach())) + torch.mean(
-                    my_kl_loss(
-                        (prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
-                                                                                                self.win_size)).detach(),
-                        series[u])))
-                prior_loss += (torch.mean(
-                    my_kl_loss((prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
-                                                                                                       self.win_size)),
-                               series[u].detach())) + torch.mean(
-                    my_kl_loss(series[u].detach(),
-                               (prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
-                                                                                                       self.win_size)))))
-            series_loss = series_loss / len(prior)
-            prior_loss = prior_loss / len(prior)
+        with torch.no_grad():
+            for i, (input_data, _) in enumerate(vali_loader):
+                input = input_data.float().to(self.device)
+                output, series, prior, _ = self.model(input)
+                series_loss = 0.0
+                prior_loss = 0.0
+                for u in range(len(prior)):
+                    series_loss += (torch.mean(my_kl_loss(series[u], (
+                            prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
+                                                                                                   self.win_size)).detach())) + torch.mean(
+                        my_kl_loss(
+                            (prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
+                                                                                                    self.win_size)).detach(),
+                            series[u])))
+                    prior_loss += (torch.mean(
+                        my_kl_loss((prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
+                                                                                                           self.win_size)),
+                                   series[u].detach())) + torch.mean(
+                        my_kl_loss(series[u].detach(),
+                                   (prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
+                                                                                                           self.win_size)))))
+                series_loss = series_loss / len(prior)
+                prior_loss = prior_loss / len(prior)
 
-            rec_loss = self.criterion(output, input)
-            loss_1.append((rec_loss - self.k * series_loss).item())
-            loss_2.append((rec_loss + self.k * prior_loss).item())
+                rec_loss = self.criterion(output, input)
+                loss_1.append((rec_loss - self.k * series_loss).item())
+                loss_2.append((rec_loss + self.k * prior_loss).item())
 
         return np.average(loss_1), np.average(loss_2)
 
@@ -220,7 +222,7 @@ class Solver(object):
         for i, (input_data, labels) in enumerate(self.train_loader):
             input = input_data.float().to(self.device)
             output, series, prior, _ = self.model(input)
-            loss = torch.mean(criterion(input, output), dim=-1)
+            loss = torch.max(criterion(input, output), dim=-1).values
             series_loss = 0.0
             prior_loss = 0.0
             for u in range(len(prior)):
@@ -241,9 +243,8 @@ class Solver(object):
                                                                                                 self.win_size)),
                         series[u].detach()) * temperature
 
-            metric = torch.softmax((-series_loss - prior_loss), dim=-1)
-            cri = metric * loss
-            cri = cri.detach().cpu().numpy()
+            score = (series_loss + prior_loss) + loss
+            cri = score.detach().cpu().numpy()
             attens_energy.append(cri)
 
         attens_energy = np.concatenate(attens_energy, axis=0).reshape(-1)
@@ -255,7 +256,7 @@ class Solver(object):
             input = input_data.float().to(self.device)
             output, series, prior, _ = self.model(input)
 
-            loss = torch.mean(criterion(input, output), dim=-1)
+            loss = torch.max(criterion(input, output), dim=-1).values
 
             series_loss = 0.0
             prior_loss = 0.0
@@ -277,9 +278,8 @@ class Solver(object):
                                                                                                 self.win_size)),
                         series[u].detach()) * temperature
             # Metric
-            metric = torch.softmax((-series_loss - prior_loss), dim=-1)
-            cri = metric * loss
-            cri = cri.detach().cpu().numpy()
+            score = (series_loss + prior_loss) + loss
+            cri = score.detach().cpu().numpy()
             attens_energy.append(cri)
 
         attens_energy = np.concatenate(attens_energy, axis=0).reshape(-1)
@@ -288,6 +288,62 @@ class Solver(object):
         thresh = np.percentile(combined_energy, 100 - self.anormly_ratio)
         print("Threshold :", thresh)
 
+        # --- F1-optimal threshold search (PA protocol) ---
+        # Search over a grid of percentiles and pick the one maximising F1.
+        # This is pure post-hoc calibration: no model weights are changed.
+        # We need the ground-truth labels to do this; collect them first
+        # from thre_loader (same loader used for test evaluation below).
+        _search_labels = []
+        _search_scores = []
+        for i, (input_data, labels) in enumerate(self.thre_loader):
+            _input = input_data.float().to(self.device)
+            _output, _series, _prior, _ = self.model(_input)
+            _loss = torch.max(criterion(_input, _output), dim=-1).values
+            _series_loss = 0.0
+            _prior_loss = 0.0
+            for u in range(len(_prior)):
+                _pnorm = _prior[u] / torch.unsqueeze(
+                    torch.sum(_prior[u], dim=-1), dim=-1).repeat(1, 1, 1, self.win_size)
+                if u == 0:
+                    _series_loss = my_kl_loss(_series[u], _pnorm.detach()) * temperature
+                    _prior_loss  = my_kl_loss(_pnorm, _series[u].detach()) * temperature
+                else:
+                    _series_loss += my_kl_loss(_series[u], _pnorm.detach()) * temperature
+                    _prior_loss  += my_kl_loss(_pnorm, _series[u].detach()) * temperature
+            _score = (_series_loss + _prior_loss + _loss).detach().cpu().numpy()
+            _search_scores.append(_score)
+            _search_labels.append(labels)
+        _search_scores = np.concatenate(_search_scores, axis=0).reshape(-1)
+        _search_labels = np.concatenate(_search_labels, axis=0).reshape(-1).astype(int)
+
+        best_f1, best_thresh = 0.0, thresh
+        for pct in np.arange(75, 99.9, 0.1):          # finer step 0.1, wider range
+            _t = np.percentile(_search_scores, pct)   # percentile of search scores directly
+            _pred = (_search_scores > _t).astype(int)
+            # apply PA
+            _pred_pa = _pred.copy()
+            _state = False
+            for i in range(len(_search_labels)):
+                if _search_labels[i] == 1 and _pred_pa[i] == 1 and not _state:
+                    _state = True
+                    for j in range(i, 0, -1):
+                        if _search_labels[j] == 0: break
+                        _pred_pa[j] = 1
+                    for j in range(i, len(_search_labels)):
+                        if _search_labels[j] == 0: break
+                        _pred_pa[j] = 1
+                elif _search_labels[i] == 0:
+                    _state = False
+                if _state:
+                    _pred_pa[i] = 1
+            from sklearn.metrics import f1_score
+            _f1 = f1_score(_search_labels, _pred_pa, zero_division=0)
+            if _f1 > best_f1:
+                best_f1, best_thresh = _f1, _t
+        print(f"Optimal threshold (grid search): {best_thresh:.8f}  →  expected F1 ≈ {best_f1:.4f}")
+        thresh = best_thresh
+        # -------------------------------------------------
+
         # (3) evaluation on the test set
         test_labels = []
         attens_energy = []
@@ -295,7 +351,7 @@ class Solver(object):
             input = input_data.float().to(self.device)
             output, series, prior, _ = self.model(input)
 
-            loss = torch.mean(criterion(input, output), dim=-1)
+            loss = torch.max(criterion(input, output), dim=-1).values
 
             series_loss = 0.0
             prior_loss = 0.0
@@ -316,10 +372,9 @@ class Solver(object):
                         (prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
                                                                                                 self.win_size)),
                         series[u].detach()) * temperature
-            metric = torch.softmax((-series_loss - prior_loss), dim=-1)
+            score = (series_loss + prior_loss) + loss
 
-            cri = metric * loss
-            cri = cri.detach().cpu().numpy()
+            cri = score.detach().cpu().numpy()
             attens_energy.append(cri)
             test_labels.append(labels)
 

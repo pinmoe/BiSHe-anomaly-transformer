@@ -127,3 +127,11 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# claude
+.claude/
+REWRITE_PROMPT_final.md
+
+# data & checkpoints
+data/
+checkpoints/
