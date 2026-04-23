@@ -199,6 +199,55 @@ class HAISegLoader(object):
                               index // self.step * self.win_size:index // self.step * self.win_size + self.win_size]), np.float32(
                 self.test_labels[index // self.step * self.win_size:index // self.step * self.win_size + self.win_size])
 
+class SKABSegLoader(object):
+    def __init__(self, data_path, win_size, step, mode="train"):
+        self.mode = mode
+        self.step = step
+        self.win_size = win_size
+        self.scaler = StandardScaler()
+
+        data = np.load(data_path + "/SKAB_train.npy")
+        self.scaler.fit(data)
+        data = self.scaler.transform(data)
+
+        test_data = np.load(data_path + "/SKAB_test.npy")
+        self.test = self.scaler.transform(test_data)
+
+        self.train = data
+        self.val = self.test
+        self.test_labels = np.load(data_path + "/SKAB_test_label.npy")
+
+        print("test:", self.test.shape)
+        print("train:", self.train.shape)
+
+    def __len__(self):
+        if self.mode == "train":
+            return (self.train.shape[0] - self.win_size) // self.step + 1
+        elif self.mode == "val":
+            return (self.val.shape[0] - self.win_size) // self.step + 1
+        elif self.mode == "test":
+            return (self.test.shape[0] - self.win_size) // self.step + 1
+        else:
+            return (self.test.shape[0] - self.win_size) // self.win_size + 1
+
+    def __getitem__(self, index):
+        index = index * self.step
+        if self.mode == "train":
+            return np.float32(self.train[index:index + self.win_size]), \
+                   np.float32(self.test_labels[0:self.win_size])
+        elif self.mode == "val":
+            return np.float32(self.val[index:index + self.win_size]), \
+                   np.float32(self.test_labels[0:self.win_size])
+        elif self.mode == "test":
+            return np.float32(self.test[index:index + self.win_size]), \
+                   np.float32(self.test_labels[index:index + self.win_size])
+        else:
+            return np.float32(self.test[
+                index // self.step * self.win_size:
+                index // self.step * self.win_size + self.win_size]), \
+                   np.float32(self.test_labels[
+                index // self.step * self.win_size:
+                index // self.step * self.win_size + self.win_size])
 
 class SMDSegLoader(object):
     def __init__(self, data_path, win_size, step, mode="train"):
@@ -242,17 +291,94 @@ class SMDSegLoader(object):
                 self.test_labels[index // self.step * self.win_size:index // self.step * self.win_size + self.win_size])
 
 
+
+
+class BATADALSegLoader(object):
+    """
+    BATADAL 水务工控系统数据集 Loader。
+
+    文件依赖（由 prepare_batadal.py 生成）：
+      {data_path}/BATADAL_train.npy       shape (8761, 43)  float32
+      {data_path}/BATADAL_test.npy        shape (4177, 43)  float32
+      {data_path}/BATADAL_test_label.npy  shape (4177,)     int32  0/1
+
+    训练集 = dataset03（纯正常数据）
+    测试集 = dataset04（ATT_FLAG: -999 → 0 正常, 1 → 1 攻击）
+    val 指向 test，与 PSM/MSL/HAI 保持一致。
+    """
+
+    def __init__(self, data_path, win_size, step, mode="train"):
+        self.mode = mode
+        self.step = step
+        self.win_size = win_size
+        self.scaler = StandardScaler()
+
+        train_data = np.load(data_path + "/BATADAL_train.npy")
+        self.scaler.fit(train_data)
+        train_data = self.scaler.transform(train_data)
+
+        test_data = np.load(data_path + "/BATADAL_test.npy")
+        self.test = self.scaler.transform(test_data)
+
+        self.train = train_data
+        self.val = self.test
+        self.test_labels = np.load(
+            data_path + "/BATADAL_test_label.npy"
+        ).reshape(-1, 1).astype(np.float32)
+
+        print("train:", self.train.shape)
+        print("test: ", self.test.shape)
+        print(f"test anomaly ratio: {self.test_labels.mean()*100:.2f}%")
+
+    def __len__(self):
+        if self.mode == "train":
+            return (self.train.shape[0] - self.win_size) // self.step + 1
+        elif self.mode == "val":
+            return (self.val.shape[0] - self.win_size) // self.step + 1
+        elif self.mode == "test":
+            return (self.test.shape[0] - self.win_size) // self.step + 1
+        else:
+            return (self.test.shape[0] - self.win_size) // self.win_size + 1
+
+    def __getitem__(self, index):
+        index = index * self.step
+        if self.mode == "train":
+            return (
+                np.float32(self.train[index : index + self.win_size]),
+                np.float32(self.test_labels[0 : self.win_size]),
+            )
+        elif self.mode == "val":
+            return (
+                np.float32(self.val[index : index + self.win_size]),
+                np.float32(self.test_labels[0 : self.win_size]),
+            )
+        elif self.mode == "test":
+            return (
+                np.float32(self.test[index : index + self.win_size]),
+                np.float32(self.test_labels[index : index + self.win_size]),
+            )
+        else:
+            base = index // self.step * self.win_size
+            return (
+                np.float32(self.test[base : base + self.win_size]),
+                np.float32(self.test_labels[base : base + self.win_size]),
+            )
+
 def get_loader_segment(data_path, batch_size, win_size=100, step=100, mode='train', dataset='KDD'):
     if (dataset == 'SMD'):
         dataset = SMDSegLoader(data_path, win_size, step, mode)
     elif (dataset == 'HAI'):
         dataset = HAISegLoader(data_path, win_size, 1, mode)
+    elif dataset == 'SKAB':
+        dataset = SKABSegLoader(data_path, win_size, 1, mode)
     elif (dataset == 'MSL'):
         dataset = MSLSegLoader(data_path, win_size, 1, mode)
     elif (dataset == 'SMAP'):
         dataset = SMAPSegLoader(data_path, win_size, 1, mode)
     elif (dataset == 'PSM'):
         dataset = PSMSegLoader(data_path, win_size, 1, mode)
+    elif dataset == 'BATADAL':
+        dataset = BATADALSegLoader(data_path, win_size, 1, mode)
 
     shuffle = False
     if mode == 'train':

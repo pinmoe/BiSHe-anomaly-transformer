@@ -87,8 +87,14 @@ class Solver(object):
         self.criterion = nn.MSELoss()
 
     def build_model(self):
-        self.model = AnomalyTransformer(win_size=self.win_size, enc_in=self.input_c, c_out=self.output_c, e_layers=3,
-                                        use_dgr_prior=self.use_dgr_prior)
+        self.model = AnomalyTransformer(
+            win_size=self.win_size,
+            enc_in=self.input_c,
+            c_out=self.output_c,
+            e_layers=3,
+            use_dgr_prior=self.use_dgr_prior,
+            dgr_mode=getattr(self, 'dgr_mode', 'none'),   # 向后兼容
+        )
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
         if torch.cuda.is_available():

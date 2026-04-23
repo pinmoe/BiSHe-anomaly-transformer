@@ -135,3 +135,8 @@ REWRITE_PROMPT_final.md
 # data & checkpoints
 data/
 checkpoints/
+results/
+diagnostics/
+logs/
+第4章内容提纲和待办清单.md
+run_all_experiments.sh

@@ -41,9 +41,25 @@ if __name__ == '__main__':
     parser.add_argument('--data_path', type=str, default='./dataset/creditcard_ts.csv')
     parser.add_argument('--model_save_path', type=str, default='checkpoints')
     parser.add_argument('--anormly_ratio', type=float, default=4.00)
-    parser.add_argument('--use_dgr_prior', type=str2bool, default='true')
+
+    # use_dgr_prior 保留向后兼容，但优先使用 dgr_mode
+    parser.add_argument('--use_dgr_prior', type=str2bool, default='false')
+
+    # 新增：明确指定 DGR 模式，避免硬编码开关
+    # none       → E1，原始高斯先验（use_dgr_prior=False）
+    # dynamic    → E2，DGRPrior 动态先验
+    # multiscale → E3，MultiScaleDGRPrior 多尺度动态先验
+    # static     → E4，StaticDGRPrior 静态可学习先验
+    parser.add_argument('--dgr_mode', type=str, default='none',
+                        choices=['none', 'dynamic', 'multiscale', 'static'])
 
     config = parser.parse_args()
+
+    # dgr_mode 覆盖 use_dgr_prior，保证两者一致
+    if config.dgr_mode != 'none':
+        config.use_dgr_prior = True
+    else:
+        config.use_dgr_prior = False
 
     args = vars(config)
     print('------------ Options -------------')
